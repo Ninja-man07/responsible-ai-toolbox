@@ -534,6 +534,10 @@ class RAIInsights(RAIBaseInsights):
             raise UserConfigValidationException(
                 f'Target name {target_column} not present in train/test data')
 
+        # Check if any of the data is missing in test and train data
+        self._validate_data_is_not_missing(test, "test")
+        self._validate_data_is_not_missing(train, "train")
+
         categorical_features = feature_metadata.categorical_features
         if (categorical_features is not None and
                 len(categorical_features) > 0):
@@ -566,6 +570,17 @@ class RAIInsights(RAIBaseInsights):
                         f"Error finding unique values in column {column}. "
                         "Please check your test data.")
 
+        # Validate that the target column isn't continuous if the
+        # user is running classification scenario
+        # To address error thrown from sklearn here:  # noqa: E501
+        # https://github.com/scikit-learn/scikit-learn/blob/main/sklearn/utils/multiclass.py#L197
+        y_data = train[target_column]
+        if (task_type == ModelTask.CLASSIFICATION and
+                pd.api.types.is_float_dtype(y_data.dtype) and
+                np.any(y_data != y_data.astype(int))):
+            raise UserConfigValidationException(
+                "Target column type must not be continuous "
+                "for classification scenario.")
         # Check if any features exist that are not numeric, datetime, or
         # categorical.
         train_features = train.drop(columns=[target_column]).columns
@@ -585,15 +600,6 @@ class RAIInsights(RAIBaseInsights):
                 "The following string features were not "
                 "identified as categorical features: "
                 f"{non_categorical_or_time_string_columns}")
-
-        list_of_feature_having_missing_values = []
-        for feature in test.columns.tolist():
-            if np.any(test[feature].isnull()):
-                list_of_feature_having_missing_values.append(feature)
-        if len(list_of_feature_having_missing_values) > 0:
-            warnings.warn(
-                f"Features {list_of_feature_having_missing_values} "
-                "have missing values in test data")
 
         self._validate_feature_metadata(
             feature_metadata, train, task_type, model, target_column)
@@ -705,6 +711,17 @@ class RAIInsights(RAIBaseInsights):
                     if_train_data=False,
                     if_predictions=True
                 )
+
+    def _validate_data_is_not_missing(self, data, data_name):
+        """Validates that data is not missing (ie null)"""
+        list_of_feature_having_missing_values = []
+        for feature in data.columns.tolist():
+            if np.any(data[feature].isnull()):
+                list_of_feature_having_missing_values.append(feature)
+        if len(list_of_feature_having_missing_values) > 0:
+            raise UserConfigValidationException(
+                f"Features {list_of_feature_having_missing_values} "
+                f"have missing values in {data_name} data.")
 
     def _validate_feature_metadata(
             self, feature_metadata, train, task_type, model, target_column):
